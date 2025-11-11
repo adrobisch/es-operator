@@ -23,10 +23,10 @@ spec:
         resources:
           requests:
             memory: 1120Mi
-            cpu: 100m
+            cpu: 500m
           limits:
             memory: 1120Mi
-            cpu: 100m
+            cpu: 2000m
         image: "docker.elastic.co/elasticsearch/elasticsearch:9.1.5"
         env:
         - name: "node.name"

@@ -1,26 +1,41 @@
-run:
-linters-settings:
-  revive:
-    rules:
-      # Adjust rules related to code simplicity, readability, and maintainability
-      - name: exported
-        severity: warning
-      - name: cyclomatic
-        severity: warning
-        arguments: [20]  # Set the maximum allowed cyclomatic complexity to 20
-
-
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - staticcheck
+    - errcheck
     - ineffassign
     - revive
+    - staticcheck
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+        - name: cyclomatic
+          arguments:
+            - 20
+          severity: warning
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - staticcheck
+        text: 'SA9003:'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
     - goimports
-    - errcheck
-issues:
-  exclude-rules:
-    # Exclude some staticcheck messages
-    - linters:
-        - staticcheck
-      text: "SA9003:"
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

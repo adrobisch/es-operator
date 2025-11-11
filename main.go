@@ -17,6 +17,7 @@ import (
 	"github.com/zalando-incubator/es-operator/pkg/clientset"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/transport"
 )
 
@@ -157,9 +158,19 @@ func configureKubeConfig(apiServerURL *url.URL, timeout time.Duration, stopCh <-
 		}, nil
 	}
 
-	config, err := rest.InClusterConfig()
+	kubeconfig := os.Getenv("KUBECONFIG")
+
+	var config *rest.Config
+	var err error
+
+	if kubeconfig != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+	} else {
+		config, err = rest.InClusterConfig()
+	}
+
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	// patch TLS config
