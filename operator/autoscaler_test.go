@@ -137,6 +137,13 @@ func TestScalingHint(t *testing.T) {
 	// don't scale: cool-down period.
 	require.Equal(t, NONE, as.scalingHint())
 
+	// simulate a scale down happened after the last scale up
+	// in this case, a new scale up should not be blocked by the previous
+	// scale-up cooldown.
+	later := metav1.NewTime(now.Add(time.Second))
+	eds.Status.LastScaleDownStarted = &later
+
+	require.Equal(t, UP, as.scalingHint())
 }
 
 func TestScaleUp(t *testing.T) {

@@ -88,8 +88,18 @@ func (as *AutoScaler) scalingHint() ScalingDirection {
 	// TODO: only consider metric samples that are not too old.
 	sampleSize := len(as.esMSet.Metrics)
 
-	// check for enough data points
+	// scale up has precedence, early return if we should go up
+	if as.shouldScaleUp(sampleSize) {
+		if as.isScaleUpCooldownOver(status) {
+			as.logger.Infof("Scaling hint: %s", UP)
+			return UP
+		}
+		as.logger.Info("Not scaling up, currently in cool-down period.")
+	}
+
+	// Then, check if scale down is required.
 	requiredScaledownSamples := int(math.Ceil(float64(scaling.ScaleDownThresholdDurationSeconds) / as.metricsInterval.Seconds()))
+
 	if sampleSize >= requiredScaledownSamples {
 		// check if CPU is below threshold for the last n samples
 		scaleDownRequired := true
@@ -107,26 +117,50 @@ func (as *AutoScaler) scalingHint() ScalingDirection {
 			as.logger.Info("Not scaling down, currently in cool-down period.")
 		}
 	}
+	return NONE
+}
+
+func (as *AutoScaler) shouldScaleUp(sampleSize int) bool {
+	scaling := as.eds.Spec.Scaling
+
+	if sampleSize == 0 {
+		return false
+	}
 
 	requiredScaleUpSamples := int(math.Ceil(float64(scaling.ScaleUpThresholdDurationSeconds) / as.metricsInterval.Seconds()))
-	if sampleSize >= requiredScaleUpSamples {
-		// check if CPU is above threshold for the last n samples
-		scaleUpRequired := true
-		for _, currentItem := range as.esMSet.Metrics[sampleSize-requiredScaleUpSamples:] {
-			if currentItem.Value <= scaling.ScaleUpCPUBoundary {
-				scaleUpRequired = false
-				break
-			}
-		}
-		if scaleUpRequired {
-			if status.LastScaleUpStarted == nil || status.LastScaleUpStarted.Time.Before(time.Now().Add(-time.Duration(scaling.ScaleUpCooldownSeconds)*time.Second)) {
-				as.logger.Infof("Scaling hint: %s", UP)
-				return UP
-			}
-			as.logger.Info("Not scaling up, currently in cool-down period.")
+	if sampleSize < requiredScaleUpSamples {
+		return false
+	}
+
+	for _, currentItem := range as.esMSet.Metrics[sampleSize-requiredScaleUpSamples:] {
+		if currentItem.Value <= scaling.ScaleUpCPUBoundary {
+			return false
 		}
 	}
-	return NONE
+
+	return true
+}
+
+// allow scaling up if:
+//   - we never scaled up before, or
+//   - the cooldown has elapsed since the last scale up, or
+//   - we have scaled down after the last scale up (e.g. to
+//     reconcile manual changes to min/max bounds), in which case
+//     a previous scale up cooldown should not block a new scale up, or
+//   - the cooldown ended since the last scale up
+func (as *AutoScaler) isScaleUpCooldownOver(status zv1.ElasticsearchDataSetStatus) bool {
+	scaling := as.eds.Spec.Scaling
+
+	if status.LastScaleUpStarted == nil {
+		return true
+	}
+
+	if status.LastScaleDownStarted != nil && status.LastScaleDownStarted.After(status.LastScaleUpStarted.Time) {
+		return true
+	}
+
+	cooldownEndsAt := status.LastScaleUpStarted.Add(time.Duration(scaling.ScaleUpCooldownSeconds) * time.Second)
+	return time.Now().After(cooldownEndsAt)
 }
 
 // TODO: check alternative approach by configuring the tags used for `index.routing.allocation`
