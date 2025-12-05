@@ -398,6 +398,7 @@ func calculateDecreasedNodes(currentDesiredNodeReplicas, currentTotalShards int3
 
 func calculateIncreasedNodes(currentDesiredNodeReplicas, currentTotalShards int32) int32 {
 	currentShardToNodeRatio := shardToNodeRatio(currentTotalShards, currentDesiredNodeReplicas)
+	log.Debugf("shard to node ratio: %f, total shards: %d", currentShardToNodeRatio, currentTotalShards)
 	if currentShardToNodeRatio <= 1 {
 		return currentTotalShards
 	}

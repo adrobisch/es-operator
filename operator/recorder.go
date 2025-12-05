@@ -9,13 +9,24 @@ import (
 	kube_record "k8s.io/client-go/tools/record"
 
 	"github.com/sirupsen/logrus"
+	zalando_clientset "github.com/zalando-incubator/es-operator/pkg/clientset"
 )
 
 // CreateEventRecorder creates an event recorder to send custom events to Kubernetes to be recorded for targeted Kubernetes objects
 func createEventRecorder(kubeClient clientset.Interface) kube_record.EventRecorder {
 	eventBroadcaster := kube_record.NewBroadcaster()
 	eventBroadcaster.StartLogging(logrus.Infof)
-	if _, isfake := kubeClient.(*fake.Clientset); !isfake {
+
+	isFake := false
+	if _, ok := kubeClient.(*fake.Clientset); ok {
+		isFake = true
+	} else if c, ok := kubeClient.(*zalando_clientset.Clientset); ok {
+		if _, ok := c.Interface.(*fake.Clientset); ok {
+			isFake = true
+		}
+	}
+
+	if !isFake {
 		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubeClient.CoreV1().RESTClient()).Events("")})
 	}
 	return eventBroadcaster.NewRecorder(scheme.Scheme, clientv1.EventSource{Component: "es-operator"})

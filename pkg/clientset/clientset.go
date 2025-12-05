@@ -49,3 +49,11 @@ func NewClientset(kubeConfig *rest.Config) (*Clientset, error) {
 		mInterface: mClient,
 	}, nil
 }
+
+func NewCustomClientset(kube kubernetes.Interface, zClient clientset.Interface, mClient metrics.Interface) *Clientset {
+	return &Clientset{
+		Interface:  kube,
+		zInterface: zClient,
+		mInterface: mClient,
+	}
+}

@@ -884,6 +884,20 @@ func (o *ElasticsearchOperator) collectResources(ctx context.Context) (map[types
 		}
 	}
 
+	statefulSets, err := o.kube.AppsV1().StatefulSets(o.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sts := range statefulSets.Items {
+		sts := sts
+		if uid, ok := getOwnerUID(sts.ObjectMeta); ok {
+			if er, ok := resources[uid]; ok {
+				er.StatefulSet = &sts
+			}
+		}
+	}
+
 	// TODO: label filter
 	pods, err := o.podInformer.Lister().Pods(o.namespace).List(labels.Everything())
 	if err != nil {
@@ -943,7 +957,9 @@ func (o *ElasticsearchOperator) scaleEDS(ctx context.Context, eds *zv1.Elasticse
 		// update EDS definition.
 		if scalingOperation.NodeReplicas != nil && *scalingOperation.NodeReplicas != currentReplicas {
 			now := metav1.Now()
-			if *scalingOperation.NodeReplicas > currentReplicas {
+			// we only store actual scale ups:
+			// if we are lagging behind even with the new replica count this will just delay later actual up-scaling executions
+			if *scalingOperation.NodeReplicas > currentReplicas && *scalingOperation.NodeReplicas > *es.StatefulSet.Spec.Replicas {
 				eds.Status.LastScaleUpStarted = &now
 			} else {
 				eds.Status.LastScaleDownStarted = &now
