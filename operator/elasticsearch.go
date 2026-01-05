@@ -358,7 +358,11 @@ func (r *EDSResource) UID() types.UID {
 }
 
 func (r *EDSResource) Replicas() int32 {
-	return edsReplicas(r.eds)
+	replicas := edsReplicas(r.eds)
+	if replicas == nil {
+		return 0
+	}
+	return *replicas
 }
 
 func (r *EDSResource) PodTemplateSpec() *v1.PodTemplateSpec {
@@ -817,29 +821,30 @@ type ESResource struct {
 
 // Replicas returns the desired node replicas of an ElasticsearchDataSet.
 // For implementation details, see edsReplicas.
-func (es *ESResource) Replicas() int32 {
+func (es *ESResource) Replicas() *int32 {
 	return edsReplicas(es.ElasticsearchDataSet)
 }
 
 // edsReplicas returns the desired node replicas of an ElasticsearchDataSet
 // as determined through spec.Replicas and autoscaling settings.
-// If unset, and autoscaling is disabled, it will return 1 as the default value.
-// In case autoscaling is enabled and spec.Replicas is nil, it will return 0,
-// leaving the actual scaling target to be calculated by scaleEDS, which will
-// then set spec.Replicas accordingly.
-func edsReplicas(eds *zv1.ElasticsearchDataSet) int32 {
+//
+// It intentionally returns a pointer to preserve the semantic difference
+// between "unset" (nil) and "set to 0".
+//
+// Rules:
+//   - If autoscaling is disabled, it returns a pointer to the desired replicas,
+//     defaulting to 1 when spec.replicas is unset.
+//   - If autoscaling is enabled, it returns spec.replicas as-is (can be nil).
+func edsReplicas(eds *zv1.ElasticsearchDataSet) *int32 {
 	scaling := eds.Spec.Scaling
 	if scaling == nil || !scaling.Enabled {
 		if eds.Spec.Replicas == nil {
-			return 1
+			defaultReplicas := int32(1)
+			return &defaultReplicas
 		}
-		return *eds.Spec.Replicas
+		return eds.Spec.Replicas
 	}
-	// initialize with 0
-	if eds.Spec.Replicas == nil {
-		return 0
-	}
-	return *eds.Spec.Replicas
+	return eds.Spec.Replicas
 }
 
 // collectResources collects all the ElasticsearchDataSet resources and there
@@ -933,22 +938,26 @@ func (o *ElasticsearchOperator) scaleEDS(ctx context.Context, eds *zv1.Elasticse
 
 	currentReplicas := edsReplicas(eds)
 
-	// Prevent writing 0 to spec.replicas when it would violate minReplicas
-	// This handles the case where:
-	// - spec.replicas is nil (e.g., after kubectl patch)
-	// - edsReplicas returns 0 for autoscaling initialization
-	// - autoscaler returns no-op (e.g., excludeSystemIndices filters all indices)
-	if currentReplicas == 0 && scaling != nil && scaling.MinReplicas > 0 {
+	// For autoscaling-enabled EDS, spec.replicas can be unset (nil), e.g. after a
+	// kubectl patch. In that case we want to avoid writing an implicit 0 and pick
+	// a stable starting point first.
+	if currentReplicas == nil && scaling != nil && scaling.MinReplicas > 0 {
 		// Prefer status.replicas (reflects actual StatefulSet state)
 		if eds.Status.Replicas > 0 {
-			currentReplicas = eds.Status.Replicas
+			statusReplicas := eds.Status.Replicas
+			currentReplicas = &statusReplicas
 		} else {
-			// Fallback to minReplicas for new/uninitialized EDS
-			currentReplicas = scaling.MinReplicas
+			minReplicas := scaling.MinReplicas
+			currentReplicas = &minReplicas
 		}
 	}
 
-	eds.Spec.Replicas = &currentReplicas
+	if currentReplicas == nil {
+		zero := int32(0)
+		currentReplicas = &zero
+	}
+
+	eds.Spec.Replicas = currentReplicas
 	as := NewAutoScaler(es, o.metricsInterval, client)
 
 	if scaling != nil && scaling.Enabled {
@@ -958,9 +967,9 @@ func (o *ElasticsearchOperator) scaleEDS(ctx context.Context, eds *zv1.Elasticse
 		}
 
 		// update EDS definition.
-		if scalingOperation.NodeReplicas != nil && *scalingOperation.NodeReplicas != currentReplicas {
+		if scalingOperation.NodeReplicas != nil && *scalingOperation.NodeReplicas != *currentReplicas {
 			now := metav1.Now()
-			if *scalingOperation.NodeReplicas > currentReplicas {
+			if *scalingOperation.NodeReplicas > *currentReplicas {
 				eds.Status.LastScaleUpStarted = &now
 			} else {
 				eds.Status.LastScaleDownStarted = &now

@@ -274,7 +274,7 @@ func TestEDSReplicas(t *testing.T) {
 			expected: 3,
 		},
 		{
-			name: "scaling enabled, replicas nil -> 0",
+			name: "scaling enabled, replicas nil -> nil",
 			eds: &zv1.ElasticsearchDataSet{
 				Spec: zv1.ElasticsearchDataSetSpec{
 					Scaling: &zv1.ElasticsearchDataSetScaling{Enabled: true},
@@ -307,8 +307,13 @@ func TestEDSReplicas(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := edsReplicas(tc.eds)
-			assert.Equal(t, tc.expected, actual)
+			if actual == nil {
+				assert.Equal(t, int32(0), tc.expected)
+				return
+			}
+			assert.Equal(t, tc.expected, *actual)
 		})
+
 	}
 }
 
@@ -403,15 +408,22 @@ func TestScaleToZeroPrevention(t *testing.T) {
 			scaling := tc.eds.Spec.Scaling
 
 			// Apply the defensive logic from scaleEDS
-			if currentReplicas == 0 && scaling != nil && scaling.MinReplicas > 0 {
+			if currentReplicas == nil && scaling != nil && scaling.MinReplicas > 0 {
 				if tc.eds.Status.Replicas > 0 {
-					currentReplicas = tc.eds.Status.Replicas
+					statusReplicas := tc.eds.Status.Replicas
+					currentReplicas = &statusReplicas
 				} else {
-					currentReplicas = scaling.MinReplicas
+					minReplicas := scaling.MinReplicas
+					currentReplicas = &minReplicas
 				}
 			}
 
-			assert.Equal(t, tc.expectedReplicas, currentReplicas, tc.description)
+			if currentReplicas == nil {
+				zero := int32(0)
+				currentReplicas = &zero
+			}
+
+			assert.Equal(t, tc.expectedReplicas, *currentReplicas, tc.description)
 		})
 	}
 }
